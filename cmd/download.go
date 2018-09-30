@@ -19,6 +19,7 @@ var (
 	Filename string
 	Target string
 	Concurrency int
+	StringList string
 )
   
 func hash(s string) string {
@@ -80,6 +81,70 @@ func Download(title string, artist string){
 	} 
 }
 
+func DownloadFromString(str string){
+	throttle := make(chan bool,Concurrency)
+	defer close(throttle)
+
+	var wg sync.WaitGroup
+
+	lines := strings.Split(str,"\n")
+	linecount := len(lines)
+
+	bar := progressbar.New(linecount)
+	bar.Add(1)
+
+	for i := 0; i < len(lines); i++  {
+		s := strings.Split(lines[i]," - ")
+
+		wg.Add(1)
+		go func(){
+			throttle <- true
+			Download(s[1],s[0])
+			<-throttle
+			bar.Add(1)
+			wg.Done() 
+		}()
+	}
+
+	wg.Wait()
+	fmt.Println("")
+}
+
+func DownloadFromFile(filename string){
+	throttle := make(chan bool,Concurrency)
+	defer close(throttle)
+
+	var wg sync.WaitGroup
+
+	file, err := os.Open(filename)
+	check(err)
+
+	defer file.Close()
+
+	linecount := countLines(filename)
+
+	bar := progressbar.New(linecount+1)
+	bar.Add(1)
+
+	scanner := bufio.NewScanner(file)
+	for scanner.Scan() {
+		line := scanner.Text()
+		s := strings.Split(line," - ")
+
+		wg.Add(1)
+		go func(){
+			throttle <- true
+			Download(s[1],s[0])
+			<-throttle
+			bar.Add(1)
+			wg.Done() 
+		}()
+	}
+	
+	wg.Wait()
+	fmt.Println("")
+}
+
 func init() {
 	donwload.Flags().StringVarP(&Target, "target", "t", "", "Where do download songs")	
 
@@ -88,6 +153,7 @@ func init() {
 
 	bulk.Flags().StringVarP(&Filename, "filename", "f", "", "The source file for downloading songs. Each line must be formatted like 'Artist - Title'")
 	bulk.Flags().IntVarP(&Concurrency, "concurrency", "c", 1, "How many files to download concurrently")
+	bulk.Flags().StringVarP(&StringList,"string-list","s","","The multiline variable containing the song list")
 
 	donwload.AddCommand(single)
 	donwload.AddCommand(bulk)
@@ -108,42 +174,17 @@ var bulk = &cobra.Command{
 	Short: "bulk song download",
 	Long:  `A command for performing bulk song download with file`,
 	Run: func(cmd *cobra.Command, args []string) {
-		file, err := os.Open(Filename)
-		check(err)
-	  
-		defer file.Close()
-		
+
 		if (Target!=""){
-		  err := os.Chdir(Target)
-		  check(err)
-		}
-	  
-		throttle := make(chan bool,Concurrency)
-		defer close(throttle)
-
-		linecount := countLines(Filename)
-		
-		bar := progressbar.New(linecount+1)
-		bar.Add(1)
-
-		var wg sync.WaitGroup
-		scanner := bufio.NewScanner(file)
-		for scanner.Scan() {
-			line := scanner.Text()
-			s := strings.Split(line," - ")
-
-			wg.Add(1)
-			go func(){
-				throttle <- true
-				Download(s[1],s[0])
-				<-throttle
-				bar.Add(1)
-				wg.Done() 
-			}()
+			err := os.Chdir(Target)
+			check(err)
 		}
 
-		wg.Wait()
-		fmt.Println("")
+		if (StringList!=""){
+			DownloadFromString(strings.Trim(StringList," "))
+		} else {
+			DownloadFromFile(Filename)
+		}
 	},
 }
 
